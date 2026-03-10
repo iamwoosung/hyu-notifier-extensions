@@ -1,20 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "한양대 LMS 캘린더",
+  "name": "한양대 LMS 알리미",
   "version": "1.0.0",
-  "description": "한양대 LMS 일정을 캘린더로 관리합니다.",
-  "permissions": ["storage", "identity", "cookies", "tabs"],
+  "description": "한양대 LMS 일정을 알림으로 관리합니다.",
+  "permissions": ["storage", "identity", "cookies", "tabs", "sidePanel"],
   "host_permissions": [
     "https://learning.hanyang.ac.kr/*",
     "http://localhost:3000/*"
   ],
   "action": {
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
+  },
+  "side_panel": {
+    "default_path": "panel.html"
   },
   "background": {
     "service_worker": "background.js"

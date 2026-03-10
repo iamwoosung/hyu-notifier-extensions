@@ -5,6 +5,7 @@ DROP TABLE IF EXISTS "User";
 
 CREATE TABLE "User" (
     "UserNo"           SERIAL       PRIMARY KEY,
+    "UserUUID"         UUID         NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     "UserKakaoID"      VARCHAR(255) NOT NULL UNIQUE,
     "UserKakaoName"    VARCHAR(255),
     "UserHYUID"        VARCHAR(255),

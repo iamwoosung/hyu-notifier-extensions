@@ -81,7 +81,7 @@ document.getElementById('sync-btn').addEventListener('click', async () => {
 
   const { session } = await chrome.storage.local.get('session');
 
-  chrome.runtime.sendMessage({ action: 'SYNC_LMS', session }, (response) => {
+  chrome.runtime.sendMessage({ action: 'SYNC_LMS', session }, async (response) => {
     // 팝업 컨텍스트 소멸로 응답 못 받는 경우 무시
     if (chrome.runtime.lastError) return;
 
@@ -92,7 +92,8 @@ document.getElementById('sync-btn').addEventListener('click', async () => {
         btn.disabled = false;
       }, 2000);
     } else if (response?.error === 'LMS_LOGIN_REQUIRED') {
-      // LMS 미로그인 → 브라우저에서 LMS 로그인 페이지 열기
+      // 로그인 후 자동 동기화를 위해 플래그 저장
+      await chrome.storage.local.set({ pendingLmsSync: true, pendingLmsSession: session });
       chrome.tabs.create({ url: 'https://learning.hanyang.ac.kr/login' });
       btn.textContent = 'LMS 로그인 필요';
       setTimeout(() => {

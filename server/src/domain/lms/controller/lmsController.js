@@ -11,6 +11,7 @@ async function sync(req, res) {
   }
   try {
     const data = await lmsService.syncLms(session, cookies);
+    console.log('[LMS sync] 동기화 성공');
     res.json({ success: true, data });
   } catch (e) {
     if (e.message === 'INVALID_SESSION') {

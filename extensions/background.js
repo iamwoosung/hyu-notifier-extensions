@@ -1,5 +1,8 @@
 const SERVER_URL = 'http://localhost:3000';
 
+// ─── Side Panel: 아이콘 클릭 시 사이드 패널 열기 ──────────────────────────────
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+
 // ─── LMS 로그인 상태 확인 (ref/background.js 방식: 실제 API 호출 → 401 여부 판단) ───
 
 async function checkLmsLogin() {
@@ -15,6 +18,47 @@ async function checkLmsLogin() {
 async function getLmsCookies() {
   return chrome.cookies.getAll({ domain: 'learning.hanyang.ac.kr' });
 }
+
+// ─── 메시지 핸들러 ────────────────────────────────────────────────────────────
+
+// ─── LMS 로그인 완료 감지 → 자동 동기화 ─────────────────────────────────────
+
+chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') return;
+  if (!tab.url || !tab.url.startsWith('https://learning.hanyang.ac.kr')) return;
+  if (tab.url.includes('/login')) return; // 아직 로그인 페이지
+
+  const { pendingLmsSync, pendingLmsSession } = await chrome.storage.local.get([
+    'pendingLmsSync',
+    'pendingLmsSession',
+  ]);
+  if (!pendingLmsSync) return;
+
+  const loggedIn = await checkLmsLogin();
+  if (!loggedIn) return;
+
+  await chrome.storage.local.remove(['pendingLmsSync', 'pendingLmsSession']);
+
+  try {
+    const cookies = await getLmsCookies();
+    const cookieMap = Object.fromEntries(cookies.map(c => [c.name, c.value]));
+    const res = await fetch(`${SERVER_URL}/api/lms/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: pendingLmsSession, cookies: cookieMap }),
+    });
+    if (!res.ok) throw new Error(`서버 오류: ${res.status}`);
+
+    chrome.action.setBadgeText({ text: '✓' });
+    chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
+    setTimeout(() => chrome.action.setBadgeText({ text: '' }), 5000);
+  } catch (e) {
+    console.error('[자동 동기화 실패]', e.message);
+    chrome.action.setBadgeText({ text: '!' });
+    chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
+    setTimeout(() => chrome.action.setBadgeText({ text: '' }), 5000);
+  }
+});
 
 // ─── 메시지 핸들러 ────────────────────────────────────────────────────────────
 

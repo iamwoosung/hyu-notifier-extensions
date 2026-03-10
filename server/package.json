@@ -1,7 +1,7 @@
 {
-  "name": "hyu-calendar-server",
+  "name": "hyu-notifier-server",
   "version": "1.0.0",
-  "description": "HYU Calendar Server",
+  "description": "HYU Notifier Server",
   "main": "src/app.js",
   "scripts": {
     "dev": "node --watch src/app.js dev",

@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant UR as User
+    participant EXT as Chrome Extension
+    participant KKO as Kakao OAuth
+    participant SVR as Server
+    participant RMQ as Docker: RabbitMQ Consumer
+    participant LMS as HYU LMS API
+    participant DB as Docker: Supabase (PostgreSQL + Realtime)
+
+    UR  ->> EXT: 로그인 시도
+    EXT ->> KKO: 카카오 로그인
+    KKO ->> EXT: 로그인 성공(userId 포함)
+    EXT ->> UR : 로그인 성공
+    UR  ->> EXT: 동기화 버튼 클릭
+    EXT ->> DB : Realtime 구독 시작 (sync_jobs 테이블)
+    EXT ->> SVR: 동기화 요청
+    SVR ->> RMQ: 동기화 요청
+    RMQ ->> LMS: API 호출
+    LMS ->> RMQ: API 응답
+    RMQ ->> DB : 동기화 수행 및 저장 (status = completed)
+    DB  ->> EXT: Realtime push (변경 감지)
+    EXT ->> UR : 동기화 완료 알림
+    EXT ->> DB : Realtime 구독 해제
