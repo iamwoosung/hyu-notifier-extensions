@@ -35,17 +35,21 @@ async function kakaoLogin(code) {
   };
 
   // 기존 유저 여부 확인
-  const existing = await db.query({ SP_NAME: 'USER_GET', p_UserKakaoID: user.id });
+  const existing = await db.query({ SP_NAME: 'USER_GET', TABLE: true, p_UserKakaoID: user.id });
   const isNew = existing.length === 0;
+  let needsLmsSync = false;
 
-  // 신규 유저면 등록
   if (isNew) {
+    // 신규 유저 등록
     const [row] = await db.query({ SP_NAME: 'USER_SET', p_UserKakaoID: user.id, p_UserKakaoName: user.nickname });
     const result = row['USER_SET'] ?? row['user_set'];
     if (result !== 0) throw new Error(`USER_SET 실패 (code: ${result})`);
+  } else {
+    // 기존 유저인데 HYU 연동이 안 된 경우
+    needsLmsSync = existing[0].UserHYUID == null;
   }
 
-  return { ...user, isNew };
+  return { ...user, isNew, needsLmsSync };
 }
 
 module.exports = { kakaoLogin };

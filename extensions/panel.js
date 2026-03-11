@@ -53,6 +53,7 @@ document.getElementById('kakao-login-btn').addEventListener('click', async () =>
 
     const url = new URL(responseUrl);
     const session = url.searchParams.get('session');
+    const needsSync = url.searchParams.get('needs_sync') === 'true';
     if (!session) throw new Error('세션 없음');
 
     const res = await fetch(`${SERVER_URL}/api/me?session=${session}`);
@@ -60,6 +61,19 @@ document.getElementById('kakao-login-btn').addEventListener('click', async () =>
     const { user } = await res.json();
 
     await chrome.storage.local.set({ session, user });
+
+    // 서버에 세션 전달 (서버 로그 기록용)
+    fetch(`${SERVER_URL}/auth/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: session }),
+    }).catch(() => {});
+
+    // LMS 미연동 상태 → 백그라운드에서 LMS 로그인 완료 시 자동 동기화 대기
+    if (needsSync) {
+      await chrome.storage.local.set({ pendingLmsSync: true, pendingLmsSession: session });
+    }
+
     showMain();
   } catch (e) {
     console.error('[카카오 로그인 실패]', e.message);

@@ -36,11 +36,18 @@ async function handleCallback(req, res) {
     const user = await oauthService.kakaoLogin(code);
     const sessionId = session.create(user);
 
-    logger.info(`[LOGIN] ${user.nickname} (id: ${user.id})`);
+    logger.info(`[LOGIN] ${user.nickname} (id: ${user.id}) | isNew: ${user.isNew} | needsLmsSync: ${user.needsLmsSync}`);
 
-    const destination = finalRedirect
-      ? `${finalRedirect}?session=${sessionId}`
-      : `/auth/success?session=${sessionId}`;
+    let destination;
+    if (user.needsLmsSync) {
+      const p = new URLSearchParams({ session: sessionId });
+      if (finalRedirect) p.set('final_redirect', finalRedirect);
+      destination = `/auth/needs-sync?${p.toString()}`;
+    } else {
+      destination = finalRedirect
+        ? `${finalRedirect}?session=${sessionId}`
+        : `/auth/success?session=${sessionId}`;
+    }
 
     res.redirect(destination);
   } catch (err) {
@@ -74,4 +81,57 @@ function authSuccess(req, res) {
 </html>`);
 }
 
-module.exports = { redirectToKakao, handleCallback, authSuccess };
+function needsSync(req, res) {
+  const { session: sessionId, final_redirect: finalRedirect } = req.query;
+  const sessionJson = JSON.stringify(sessionId ?? '');
+  const finalRedirectJson = JSON.stringify(finalRedirect ?? '');
+
+  res.send(`<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>LMS 동기화 필요</title>
+  <style>
+    body { display:flex; justify-content:center; align-items:center; height:100vh;
+           font-family:sans-serif; background:#e3f2fd; margin:0; }
+    .box { text-align:center; max-width:360px; }
+    .icon { font-size:48px; }
+    h2 { margin:12px 0 8px; color:#333; }
+    p  { color:#555; font-size:14px; line-height:1.6; }
+    button {
+      margin-top:20px; padding:12px 32px;
+      background:#1565c0; color:#fff;
+      border:none; border-radius:8px;
+      font-size:15px; cursor:pointer;
+    }
+    button:hover { background:#0d47a1; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="icon">🎓</div>
+    <h2>한양대 LMS 동기화 필요</h2>
+    <p>한양대 LMS에 로그인하면 강의 일정을 자동으로 캘린더에 동기화할 수 있습니다.</p>
+    <button onclick="onConfirm()">확인 (LMS로 이동)</button>
+  </div>
+  <script>
+    function onConfirm() {
+      const session = ${sessionJson};
+      const finalRedirect = ${finalRedirectJson};
+      window.open('https://lms.hanyang.ac.kr', '_blank');
+      if (finalRedirect) {
+        location.href = finalRedirect + '?session=' + encodeURIComponent(session) + '&needs_sync=true';
+      }
+    }
+  </script>
+</body>
+</html>`);
+}
+
+function receiveSession(req, res) {
+  const { sessionId, token } = req.body ?? {};
+  logger.info(`[EXTENSION SESSION] sessionId: ${sessionId ?? '(none)'} | token: ${token ?? '(none)'}`);
+  res.json({ ok: true });
+}
+
+module.exports = { redirectToKakao, handleCallback, authSuccess, needsSync, receiveSession };

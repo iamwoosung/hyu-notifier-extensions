@@ -11,12 +11,16 @@ async function query(query) {
   }
 
   const spName = query.SP_NAME;
+  const isTable = !!query.TABLE;
   const params = { ...query };
   delete params.SP_NAME;
+  delete params.TABLE;
 
   const values = Object.values(params);
   const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
-  const sql = `SELECT "${spName}"(${placeholders})`;
+  const sql = isTable
+    ? `SELECT * FROM "${spName}"(${placeholders})`
+    : `SELECT "${spName}"(${placeholders})`;
 
   logger.info(`[SP REQUEST] ${sql} | params: ${JSON.stringify(values)}`);
   const result = await postgres.query(sql, values);
