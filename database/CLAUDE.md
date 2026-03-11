@@ -1,10 +1,14 @@
 - Database: PostgreSQL
-- All data access must go through stored procedures.
+- All data access must go through stored functions.
 - Tables and fields must be named in PascalCase. (e.g. UserNo)
 - Table creation queries are saved in "01. Table.sql".
-- Stored procedure queries are saved in "02. SP.sql".
+- Stored function queries are saved in "02. SP.sql".
 - Default dataset queries are saved in "03. Default.sql".
-- All table and procedure creation queries must use DROP IF EXISTS before CREATE to ensure clean recreation.
+- All table and function creation queries must use DROP IF EXISTS before CREATE to ensure clean recreation.
 - String fields are limited to a maximum of 255 characters.
-- Procedure names must end with one of: _SET, _GET, _UPT, _DEL, _LIST.
-- Procedure names must be written in English only.
+- Function names must end with one of: _SET, _GET, _UPT, _DEL, _LIST.
+- Function names must be written in English only.
+- Use CREATE OR REPLACE FUNCTION (not PROCEDURE). Functions can return scalars (RETURNS INTEGER) or rows (RETURNS TABLE(...)).
+- DML functions (_SET, _UPT, _DEL) return INTEGER: 0 = success, 9999 = failure. Wrap body in EXCEPTION WHEN OTHERS THEN RETURN 9999.
+- Query functions (_GET, _LIST) use RETURNS TABLE(...) with RETURN QUERY.
+- Call syntax from server: SELECT "FUNCTION_NAME"($1, $2, ...) via db.query({ SP_NAME, ...params }).

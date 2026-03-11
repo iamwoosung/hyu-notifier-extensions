@@ -1,5 +1,5 @@
 const axios = require('axios');
-// const db = require('../../../global/config/db');
+const db = require('../../../global/config/db');
 
 const KAKAO_CLIENT_ID = process.env.KAKAO_CLIENT_ID;
 const KAKAO_CLIENT_SECRET = process.env.KAKAO_CLIENT_SECRET;
@@ -34,17 +34,18 @@ async function kakaoLogin(code) {
     nickname: profile.nickname ?? null,
   };
 
-  // 신규 유저는 INSERT, 기존 유저는 닉네임 UPDATE
-  // await db.query(
-  //   `INSERT INTO "USER" (kakao_id, kakao_nickname)
-  //    VALUES ($1, $2)
-  //    ON CONFLICT (kakao_id) DO UPDATE
-  //      SET kakao_nickname = EXCLUDED.kakao_nickname,
-  //          updated_at     = NOW()`,
-  //   [user.id, user.nickname]
-  // );
+  // 기존 유저 여부 확인
+  const existing = await db.query({ SP_NAME: 'USER_GET', p_UserKakaoID: user.id });
+  const isNew = existing.length === 0;
 
-  return user;
+  // 신규 유저면 등록
+  if (isNew) {
+    const [row] = await db.query({ SP_NAME: 'USER_SET', p_UserKakaoID: user.id, p_UserKakaoName: user.nickname });
+    const result = row['USER_SET'] ?? row['user_set'];
+    if (result !== 0) throw new Error(`USER_SET 실패 (code: ${result})`);
+  }
+
+  return { ...user, isNew };
 }
 
 module.exports = { kakaoLogin };

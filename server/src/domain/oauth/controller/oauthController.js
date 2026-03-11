@@ -1,5 +1,6 @@
 const oauthService = require('../service/oauthService');
-const session = require('../../../global/modules/session'); // 콜백 후 세션 생성용
+const session = require('../../../global/modules/session');
+const logger = require('../../../global/modules/logger');
 
 const PORT = process.env.PORT || 3000;
 const KAKAO_CLIENT_ID = process.env.KAKAO_CLIENT_ID;
@@ -35,7 +36,7 @@ async function handleCallback(req, res) {
     const user = await oauthService.kakaoLogin(code);
     const sessionId = session.create(user);
 
-    console.log(`[LOGIN] ${user.nickname} (id: ${user.id})`);
+    logger.info(`[LOGIN] ${user.nickname} (id: ${user.id})`);
 
     const destination = finalRedirect
       ? `${finalRedirect}?session=${sessionId}`
@@ -43,7 +44,7 @@ async function handleCallback(req, res) {
 
     res.redirect(destination);
   } catch (err) {
-    console.error('[Kakao OAuth Error]', err.response?.data ?? err.message);
+    logger.error(`[Kakao OAuth Error] ${JSON.stringify(err.response?.data ?? err.message)}`);
     res.status(500).send('카카오 인증 중 오류가 발생했습니다.');
   }
 }

@@ -1,5 +1,6 @@
 const axios = require('axios');
 const session = require('../../../global/modules/session');
+const logger = require('../../../global/modules/logger');
 
 const LMS_BASE = 'https://learning.hanyang.ac.kr';
 
@@ -33,10 +34,7 @@ async function syncLms(sessionId, cookies) {
   const courses = dashRes.data;
   if (!Array.isArray(courses)) throw new Error('과목 목록 조회 실패');
 
-  console.log(`\n✅ 수강 중인 과목 (총 ${courses.length}개):`);
-  courses.forEach((c, i) => {
-    console.log(`  ${i + 1}. ${c.courseName || c.originalName || c.course_code} (ID: ${c.id})`);
-  });
+  logger.info(`수강 중인 과목 (총 ${courses.length}개): ${courses.map((c, i) => `${i + 1}.${c.courseName || c.originalName || c.course_code}(${c.id})`).join(', ')}`);
 
   // xn_api_token: LearningX Bearer 토큰
   const apiToken = cookies['xn_api_token'];

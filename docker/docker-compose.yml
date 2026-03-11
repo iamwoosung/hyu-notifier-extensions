@@ -1,15 +1,101 @@
 services:
+
+  # ── 1. PostgreSQL ─────────────────────────────────────────────────────────
+  # 역할: 메인 데이터베이스
+  # wal_level=logical : 기본값(replica)에서 변경. Supabase Realtime이
+  #   DB 변경사항을 감지하려면 논리 복제(Logical Replication)가 필요함.
+  #   이 옵션 없이는 Realtime 서비스가 작동하지 않음.
+  # healthcheck : 다른 서비스들이 postgres가 완전히 뜬 뒤에 시작하도록 대기
   postgres:
     image: postgres:16
     container_name: hyu-notifier-db
     env_file:
       - ${COMPOSE_ENV_FILE:-pkg.env.production}
     ports:
-      - "${DB_PORT}:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../database:/docker-entrypoint-initdb.d
+    command: postgres -c wal_level=logical
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
+    networks:
+      - hyu-net
 
+  # ── 2. Supabase Realtime ──────────────────────────────────────────────────
+  # 역할: PostgreSQL 변경사항을 WebSocket으로 클라이언트에 실시간 push
+  # 동작 원리: postgres WAL(Write-Ahead Log)을 읽어서 변경된 행을
+  #   구독 중인 클라이언트에게 즉시 전송 (익스텐션 → 구독 → DB 변경 → 즉시 알림)
+  # env_file의 DB_NAME, DB_USER, DB_PASSWORD를 읽음 (POSTGRES_* 아님)
+  # environment의 DB_HOST=postgres : Docker 내부 네트워크에서 서비스명으로 통신
+  # PORT=4000 : 외부에서 ws://localhost:4000 으로 WebSocket 연결
+  realtime:
+    image: supabase/realtime:v2.25.50
+    container_name: hyu-notifier-realtime
+    ports:
+      - "4000:4000"
+    env_file:
+      - ${COMPOSE_ENV_FILE:-pkg.env.production}
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=hyu_notifier
+      - PORT=4000
+      - FLY_APP_NAME=realtime
+      - FLY_ALLOC_ID=localdev
+      - ERL_AFLAGS=-proto_dist inet_tcp
+      - DNS_NODES=''
+      - ENABLE_TAILSCALE=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - hyu-net
+
+  # ── 3. RabbitMQ ───────────────────────────────────────────────────────────
+  # 역할: 비동기 메시지 큐 브로커
+  # 흐름: Server → RabbitMQ 큐에 작업 추가 → Consumer가 꺼내서 처리
+  # LMS API 호출이 느려도 Server는 즉시 응답 가능
+  # 5672  : AMQP 프로토콜 포트 (서버/컨슈머가 연결하는 포트)
+  # 15672 : 관리 UI 포트 → 브라우저에서 http://localhost:15672 로 접속해
+  #         큐 상태, 메시지 수, 처리량 등을 시각적으로 모니터링 가능
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: hyu-notifier-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    env_file:
+      - ${COMPOSE_ENV_FILE:-pkg.env.production}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - hyu-net
+
+  # ── 4. Server / Consumer ──────────────────────────────────────────────────
+  # 추후 추가 예정 (현재는 로컬에서 직접 실행)
+
+# ── 네트워크 ──────────────────────────────────────────────────────────────────
+# bridge: 컨테이너들이 서로 서비스명으로 통신 (예: DB_HOST=postgres)
+# 외부(호스트)에서는 ports로 열린 포트만 접근 가능
+networks:
+  hyu-net:
+    driver: bridge
+
+# ── 볼륨 ─────────────────────────────────────────────────────────────────────
+# Docker가 관리하는 영구 저장소. 컨테이너 삭제해도 데이터 유지.
+# 완전 초기화하려면: docker volume rm docker_postgres_data docker_rabbitmq_data
 volumes:
   postgres_data:
+  rabbitmq_data:
