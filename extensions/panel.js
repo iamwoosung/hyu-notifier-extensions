@@ -117,7 +117,7 @@ document.getElementById('sync-btn').addEventListener('click', async () => {
     if (response?.success) {
       btn.textContent = '✓ 완료';
       setTimeout(() => {
-        btn.textContent = '⟳ LMS 동기화';
+        btn.textContent = '⟳ Sync';
         btn.disabled = false;
       }, 2000);
     } else if (response?.error === 'LMS_LOGIN_REQUIRED') {
@@ -126,14 +126,14 @@ document.getElementById('sync-btn').addEventListener('click', async () => {
       chrome.tabs.create({ url: 'https://learning.hanyang.ac.kr/login' });
       btn.textContent = 'LMS 로그인 필요';
       setTimeout(() => {
-        btn.textContent = '⟳ LMS 동기화';
+        btn.textContent = '⟳ Sync';
         btn.disabled = false;
       }, 3000);
     } else {
       console.error('[LMS 동기화 실패]', response?.error);
       btn.textContent = '⚠ 오류 발생';
       setTimeout(() => {
-        btn.textContent = '⟳ LMS 동기화';
+        btn.textContent = '⟳ Sync';
         btn.disabled = false;
       }, 2000);
     }

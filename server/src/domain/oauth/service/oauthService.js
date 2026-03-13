@@ -38,18 +38,26 @@ async function kakaoLogin(code) {
   const existing = await db.query({ SP_NAME: 'USER_GET', TABLE: true, p_UserKakaoID: user.id });
   const isNew = existing.length === 0;
   let needsLmsSync = false;
+  let UserNo;
 
   if (isNew) {
     // 신규 유저 등록
     const [row] = await db.query({ SP_NAME: 'USER_SET', p_UserKakaoID: user.id, p_UserKakaoName: user.nickname });
     const result = row['USER_SET'] ?? row['user_set'];
     if (result !== 0) throw new Error(`USER_SET 실패 (code: ${result})`);
+
+    // 신규 유저 등록 후 조회
+    const newUser = await db.query({ SP_NAME: 'USER_GET', TABLE: true, p_UserKakaoID: user.id });
+    if (newUser.length > 0) {
+      UserNo = newUser[0].UserNo;
+    }
   } else {
     // 기존 유저인데 HYU 연동이 안 된 경우
     needsLmsSync = existing[0].UserHYUID == null;
+    UserNo = existing[0].UserNo;
   }
 
-  return { ...user, isNew, needsLmsSync };
+  return { ...user, UserNo, isNew, needsLmsSync };
 }
 
 module.exports = { kakaoLogin };

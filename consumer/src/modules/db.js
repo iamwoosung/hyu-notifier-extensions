@@ -1,5 +1,5 @@
 const { Pool } = require('pg');
-const logger = require('../../modules/logger');
+const logger = require('./logger');
 
 const RECONNECT_INTERVAL = 5000; // 5초
 
@@ -25,12 +25,24 @@ const initWithRetry = async (attempt = 1) => {
   }
 };
 
-async function query(sql, params = []) {
+async function query({ SP_NAME, TABLE, ...params }) {
+  if (!SP_NAME) {
+    throw new Error('SP_NAME is required');
+  }
+
+  const values = Object.values(params);
+  const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+  const sql = TABLE
+    ? `SELECT * FROM "${SP_NAME}"(${placeholders})`
+    : `SELECT "${SP_NAME}"(${placeholders})`;
+
+  logger.info(`[SP REQUEST] ${sql} | params: ${JSON.stringify(values)}`);
   try {
-    const result = await pool.query(sql, params);
+    const result = await pool.query(sql, values);
+    logger.info(`[SP RESULT ] ${SP_NAME} | rows: ${result.rows.length}`);
     return result.rows;
   } catch (err) {
-    logger.error(`[DB QUERY ERROR] ${err.message}`);
+    logger.error(`[SP ERROR  ] ${SP_NAME} | ${err.message}`);
     throw err;
   }
 }

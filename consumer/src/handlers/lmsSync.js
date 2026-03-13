@@ -1,5 +1,6 @@
 const axios = require('axios');
 const logger = require('../modules/logger');
+const db = require('../modules/db');
 
 const LMS_BASE = 'https://learning.hanyang.ac.kr';
 
@@ -20,8 +21,12 @@ function createLmsClient(cookieHeader) {
 }
 
 async function handle(message) {
-  const { session, cookies } = message.payload;
-  logger.info(`[LMS_SYNC] 처리 시작 | session: ${session} | messageId: ${message.messageId}`);
+  const { session, user, cookies } = message.payload;
+  logger.info(`[LMS_SYNC] 처리 시작 | user: ${JSON.stringify(user)} | messageId: ${message.messageId}`);
+
+  if (!user || !user.UserNo) {
+    throw new Error('User information is missing in message payload');
+  }
 
   const cookieHeader = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
   const client = createLmsClient(cookieHeader);
@@ -31,9 +36,24 @@ async function handle(message) {
   const courses = dashRes.data;
   if (!Array.isArray(courses)) throw new Error('과목 목록 조회 실패');
 
-  logger.info(`[LMS_SYNC] 수강 과목 ${courses.length}개 조회 완료 | ${courses.map(c => c.courseName || c.originalName || c.course_code).join(', ')}`);
+  // 과목 리스트를 JSON 형식으로 변환
+  const subjectsList = courses.map(course => {
+    const courseId = course.id;
+    const courseName = course.courseName || course.originalName || course.course_code;
+    // 과목 코드와 과목명 추출
+    // 예: "202610HY12266_소프트웨어공학" → SubjectCode: "202610HY12266", SubjectName: "소프트웨어공학"
+    // 또는 course_code가 이미 분리되어 있을 수 있음
+    const parts = courseName.split('_');
+    const subjectCode = course.course_code || (parts.length > 1 ? parts[0] : courseName);
+    const subjectName = parts.length > 1 ? parts.slice(1).join('_') : courseName;
 
-  const apiToken = cookies['xn_api_token'];
+    return {
+      SubjectCode: subjectCode,
+      SubjectName: subjectName,
+    };
+  });
+
+  logger.info(`[LMS_SYNC] 수강 과목 ${subjectsList.length}개 조회 완료 | ${subjectsList.map(s => `${s.SubjectCode}_${s.SubjectName}`).join(', ')}`);
 
   // 각 과목의 과제 + 제출 현황 + LearningX 모듈 병렬 조회
   const courseDetails = await Promise.all(courses.map(async (course) => {
@@ -52,13 +72,13 @@ async function handle(message) {
       }
 
       let modules = [];
-      if (apiToken) {
+      if (cookies['xn_api_token']) {
         try {
           const modRes = await axios.get(
             `${LMS_BASE}/learningx/api/v1/courses/${courseId}/modules?include_detail=true`,
             {
               headers: {
-                Authorization: `Bearer ${apiToken}`,
+                Authorization: `Bearer ${cookies['xn_api_token']}`,
                 Accept: 'application/json',
                 Cookie: cookieHeader,
               },
@@ -74,9 +94,22 @@ async function handle(message) {
     }
   }));
 
+  // DB에 과목 정보 저장
+  try {
+    const result = await db.query({
+      SP_NAME: 'SUBJECT_SYNC',
+      TABLE: false,
+      p_UserNo: user.UserNo,
+      p_SubjectsJson: JSON.stringify(subjectsList),
+    });
+    logger.info(`[LMS_SYNC] DB 저장 완료 | result: ${JSON.stringify(result)}`);
+  } catch (dbErr) {
+    logger.error(`[LMS_SYNC] DB 저장 실패: ${dbErr.message}`);
+    throw dbErr;
+  }
+
   logger.info(`[LMS_SYNC] 처리 완료 | messageId: ${message.messageId} | 과목 수: ${courseDetails.length}`);
 
-  // TODO: DB 저장 로직 추가 예정
   return courseDetails;
 }
 

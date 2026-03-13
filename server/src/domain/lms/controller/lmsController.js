@@ -17,7 +17,7 @@ async function sync(req, res) {
   }
 
   try {
-    const messageId = await mq.publish('lms.sync', { session: sessionId, cookies });
+    const messageId = await mq.publish('lms.sync', { session: sessionId, user, cookies });
     logger.info(`[LMS sync] MQ 전송 완료 | messageId: ${messageId}`);
     res.status(202).json({ success: true, messageId });
   } catch (e) {

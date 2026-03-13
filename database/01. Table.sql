@@ -15,3 +15,20 @@ CREATE TABLE "User" (
     "UserInsertDate"   TIMESTAMP    DEFAULT NULL,
     "UserUpdateDate"   TIMESTAMP    DEFAULT NULL
 );
+
+-- =============================================
+-- Table: Subject (사용자 수강 과목)
+-- =============================================
+DROP TABLE IF EXISTS "Subject";
+
+CREATE TABLE "Subject" (
+    "SubjectNo"       SERIAL       PRIMARY KEY,
+    "UserNo"          INTEGER      NOT NULL REFERENCES "User"("UserNo") ON DELETE CASCADE,
+    "SubjectCode"     VARCHAR(255) NOT NULL,
+    "SubjectName"     VARCHAR(255) NOT NULL,
+    "Semester"        VARCHAR(255) NOT NULL DEFAULT '',
+    "DeleteFlag"      INTEGER      NOT NULL DEFAULT 0,
+    "SubjectInsertDate" TIMESTAMP  DEFAULT NULL,
+    "SubjectUpdateDate" TIMESTAMP  DEFAULT NULL,
+    UNIQUE ("UserNo", "SubjectCode", "Semester")
+);

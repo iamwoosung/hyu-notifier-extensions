@@ -4,8 +4,11 @@
   "description": "HYU Notifier Server",
   "main": "src/app.js",
   "scripts": {
-    "dev": "node --watch src/app.js dev",
+    "dev": "nodemon --watch src src/app.js dev",
     "production": "node src/app.js production"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
   },
   "dependencies": {
     "amqplib": "^0.10.9",

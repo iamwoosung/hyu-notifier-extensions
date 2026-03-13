@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "한양대 LMS 알리미",
+  "name": "한양대 노티파이어",
   "version": "1.0.0",
-  "description": "한양대 LMS 일정을 알림으로 관리합니다.",
+  "description": "한양대학교 일정을 관리합니다.",
   "permissions": ["storage", "identity", "cookies", "tabs", "sidePanel"],
   "host_permissions": [
     "https://learning.hanyang.ac.kr/*",
