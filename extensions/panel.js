@@ -22,6 +22,7 @@ function showMain() {
   document.getElementById('login-view').classList.add('hidden');
   document.getElementById('needs-sync-view').classList.add('hidden');
   document.getElementById('main-view').classList.remove('hidden');
+  loadCalendar();
 }
 
 // ─── 초기화: 저장된 세션 확인 ─────────────────────────────────────────────────
@@ -199,6 +200,7 @@ document.getElementById('sync-btn').addEventListener('click', async () => {
         showToast('✓ LMS 동기화 완료!', 'success');
         btn.textContent = '동기화';
         btn.disabled = false;
+        loadCalendar();
       },
       () => {
         showToast('✗ 동기화 실패. 다시 시도해주세요.', 'error');
@@ -216,14 +218,6 @@ document.getElementById('sync-btn').addEventListener('click', async () => {
 
     if (response?.success) {
       dbg('MQ 전송 완료. Realtime 이벤트 대기 중...');
-    } else if (response?.error === 'LMS_LOGIN_REQUIRED') {
-      // Realtime 구독 해제
-      if (realtimeChannel) { realtimeChannel.unsubscribe(); realtimeChannel = null; }
-      // 로그인 후 자동 동기화를 위해 플래그 저장
-      await chrome.storage.local.set({ pendingLmsSync: true, pendingLmsSession: session });
-      chrome.tabs.create({ url: 'https://learning.hanyang.ac.kr/login' });
-      btn.textContent = 'LMS 로그인 필요';
-      setTimeout(() => { btn.textContent = '동기화'; btn.disabled = false; }, 3000);
     } else {
       // Realtime 구독 해제
       if (realtimeChannel) { realtimeChannel.unsubscribe(); realtimeChannel = null; }
@@ -237,6 +231,10 @@ document.getElementById('sync-btn').addEventListener('click', async () => {
 // ─── 초기 자동 동기화 Realtime 구독 ──────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request) => {
+  if (request.action === 'DEBUG_LOG') {
+    dbg(request.msg);
+    return;
+  }
   if (request.action !== 'AUTO_SYNC_STARTED') return;
   chrome.storage.local.get('userUUID', ({ userUUID }) => {
     if (!userUUID) return;
@@ -269,6 +267,54 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
     if (e.target === overlay) overlay.classList.add('hidden');
   });
 });
+
+// ─── 캘린더 ───────────────────────────────────────────────────────────────────
+
+let calendarInstance = null;
+
+async function loadCalendar() {
+  if (typeof FullCalendar === 'undefined') return;
+
+  // TODO: 실제 API 연동 시 아래 mock 데이터를 교체
+  // const { session } = await chrome.storage.local.get('session');
+  // const res = await fetch(`${SERVER_URL}/api/calendar?session=${session}`);
+  // const { events } = await res.json();
+  const today = new Date();
+  const y = today.getFullYear(), m = today.getMonth();
+  const d = (offset) => new Date(y, m, today.getDate() + offset).toISOString().slice(0, 10);
+  const events = [
+    { id: 'a1', title: '[CS101] 운영체제 과제 1', start: d(2),  color: '#d32f2f', extendedProps: { type: 'assignment', subjectCode: 'CS101', isSubmitted: false } },
+    { id: 'a2', title: '[CS102] 알고리즘 과제',   start: d(5),  color: '#388e3c', extendedProps: { type: 'assignment', subjectCode: 'CS102', isSubmitted: true  } },
+    { id: 'a3', title: '[CS103] 데이터베이스 보고서', start: d(9), color: '#d32f2f', extendedProps: { type: 'assignment', subjectCode: 'CS103', isSubmitted: false } },
+    { id: 'v1', title: '[CS101] 3주차 강의 영상', start: d(3),  color: '#9e9e9e', extendedProps: { type: 'video',      subjectCode: 'CS101', isWatched: true  } },
+    { id: 'v2', title: '[CS102] 2주차 알고리즘',  start: d(7),  color: '#f57c00', extendedProps: { type: 'video',      subjectCode: 'CS102', isWatched: false } },
+    { id: 'v3', title: '[CS103] DB 설계 기초',    start: d(-1), color: '#f57c00', extendedProps: { type: 'video',      subjectCode: 'CS103', isWatched: false } },
+  ];
+
+  if (calendarInstance) {
+    calendarInstance.removeAllEvents();
+    calendarInstance.addEventSource(events);
+    return;
+  }
+
+  const el = document.getElementById('calendar');
+  calendarInstance = new FullCalendar.Calendar(el, {
+    initialView: 'dayGridMonth',
+    locale: 'ko',
+    headerToolbar: { left: 'prev', center: 'title', right: 'next' },
+    height: 'auto',
+    dayMaxEvents: 3,
+    events,
+    eventClick(info) {
+      const p = info.event.extendedProps;
+      const status = p.type === 'assignment'
+        ? (p.isSubmitted ? '제출 완료' : '미제출')
+        : (p.isWatched   ? '시청 완료' : '미시청');
+      showToast(`[${p.subjectCode}] ${info.event.title} · ${status}`, 'info');
+    },
+  });
+  calendarInstance.render();
+}
 
 // ─── 시작 ─────────────────────────────────────────────────────────────────────
 

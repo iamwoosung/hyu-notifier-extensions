@@ -254,7 +254,7 @@ BEGIN
             "VideoInsertDate", "VideoUpdateDate"
         ) VALUES (
             v_SubjectNo,
-            (v_Item->>'LmsItemID')::INTEGER,
+            (v_Item->>'LmsItemID')::BIGINT,
             v_Item->>'Title',
             (v_Item->>'IsWatched')::BOOLEAN,
             NULLIF(v_Item->>'DurationSec', '')::INTEGER,

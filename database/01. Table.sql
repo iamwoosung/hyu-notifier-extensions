@@ -44,7 +44,7 @@ DROP TABLE IF EXISTS "Video" CASCADE;
 CREATE TABLE "Video" (
     "VideoNo"         SERIAL        PRIMARY KEY,
     "SubjectNo"       INTEGER       NOT NULL REFERENCES "Subject"("SubjectNo") ON DELETE CASCADE,
-    "LmsItemID"       INTEGER       NOT NULL,            -- LearningX module item ID
+    "LmsItemID"       BIGINT        NOT NULL,            -- LearningX module item ID
     "Title"           VARCHAR(500)  NOT NULL,
     "IsWatched"       BOOLEAN       NOT NULL DEFAULT false,
     "DurationSec"     INTEGER       DEFAULT NULL,        -- 영상 길이(초), 파일류는 NULL

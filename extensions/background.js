@@ -8,7 +8,9 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 async function checkLmsLogin() {
   // 현재 쿠키 이름 진단용 로그
   const cookies = await chrome.cookies.getAll({ domain: 'learning.hanyang.ac.kr' });
-  console.log('[LMS 쿠키 목록]', cookies.map(c => c.name));
+  const cookieNames = cookies.map(c => c.name);
+  console.log('[LMS 쿠키 목록]', cookieNames);
+  chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: `[LMS 쿠키 목록] ${cookieNames.join(', ')}` }).catch(() => {});
 
   // API 응답으로 로그인 여부 판단 (401이면 미로그인)
   try {
@@ -28,50 +30,101 @@ async function getLmsCookies() {
   return chrome.cookies.getAll({ domain: 'learning.hanyang.ac.kr' });
 }
 
-// ─── 메시지 핸들러 ────────────────────────────────────────────────────────────
-
-// ─── LMS 로그인 완료 감지 → 자동 동기화 ─────────────────────────────────────
-
-chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
-  if (changeInfo.status !== 'complete') return;
-  if (!tab.url || !tab.url.startsWith('https://learning.hanyang.ac.kr')) return;
-  if (tab.url.includes('/login')) return; // 아직 로그인 페이지
-
-  console.log('[탭 감지] URL:', tab.url);
-
-  const { pendingLmsSync, pendingLmsSession } = await chrome.storage.local.get([
-    'pendingLmsSync',
-    'pendingLmsSession',
-  ]);
-  console.log('[동기화 대기 여부]', pendingLmsSync, '| 세션:', pendingLmsSession);
-  if (!pendingLmsSync) return;
-
-  const loggedIn = await checkLmsLogin();
-  if (!loggedIn) return;
-
-  await chrome.storage.local.remove(['pendingLmsSync', 'pendingLmsSession']);
-
-  try {
-    const cookies = await getLmsCookies();
-    const cookieMap = Object.fromEntries(cookies.map(c => [c.name, c.value]));
-    const res = await fetch(`${SERVER_URL}/api/lms/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: pendingLmsSession, cookies: cookieMap }),
-    });
-    if (!res.ok) throw new Error(`서버 오류: ${res.status}`);
-
-    chrome.runtime.sendMessage({ action: 'AUTO_SYNC_STARTED' }).catch(() => {});
-    chrome.action.setBadgeText({ text: '✓' });
-    chrome.action.setBadgeBackgroundColor({ color: '#22c55e' });
-    setTimeout(() => chrome.action.setBadgeText({ text: '' }), 5000);
-  } catch (e) {
-    console.error('[자동 동기화 실패]', e.message);
-    chrome.action.setBadgeText({ text: '!' });
-    chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
-    setTimeout(() => chrome.action.setBadgeText({ text: '' }), 5000);
+// result 토큰 획득 - 배경탭에서 SSO URL 감시
+// 반환값: true (취득 성공 or 이미 존재) | false (타임아웃)
+// portal 세션 만료 시: 탭을 활성화하여 사용자가 포털 로그인 → 이후 SSO 자동 완료
+async function getXnApiToken() {
+  const cookies = await chrome.cookies.getAll({ domain: 'learning.hanyang.ac.kr' });
+  if (cookies.find(c => c.name === 'xn_api_token')) {
+    chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[xn_api_token] 쿠키 존재 → SSO 생략' }).catch(() => {});
+    return true; // 이미 있음
   }
-});
+
+  chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[xn_api_token] 쿠키 없음 → 백그라운드 SSO 시작' }).catch(() => {});
+
+  return new Promise((resolve) => {
+    let backgroundTabId = null;
+    let done = false;
+    let tabActivated = false;
+    let pollInterval = null;
+    const timer = setTimeout(() => finish(false, '[xn_api_token] SSO 흐름 타임아웃 (60초)'), 60000);
+
+    function finish(result, msg) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (pollInterval) clearInterval(pollInterval);
+      chrome.tabs.onUpdated.removeListener(onTabUpdated);
+      if (backgroundTabId) setTimeout(() => chrome.tabs.remove(backgroundTabId).catch(() => {}), 100);
+      chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg }).catch(() => {});
+      resolve(result);
+    }
+
+    // 배경탭 URL 변경 감시
+    function onTabUpdated(tabId, _changeInfo, tab) {
+      if (done) return;
+      if (tabId !== backgroundTabId) return;
+      if (!tab.url) return;
+
+      // portal 로그인 페이지 감지 → 탭을 활성화하여 사용자가 로그인 후 SSO 자동 완료
+      if (tab.url.includes('api.hanyang.ac.kr/oauth/login')) {
+        if (!tabActivated) {
+          tabActivated = true;
+          chrome.tabs.update(backgroundTabId, { active: true }).catch(() => {});
+          chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[xn_api_token] portal 세션 만료 → 포털 로그인 탭 활성화 (로그인 후 자동 진행)' }).catch(() => {});
+        }
+        return; // 로그인 대기, 이후 SSO 완료되면 result 토큰 감지됨
+      }
+
+      try {
+        // result 파라미터 포함 확인
+        const url = new URL(tab.url);
+        const resultToken = url.searchParams.get('result');
+
+        if (resultToken) {
+          done = true;
+          clearTimeout(timer);
+          if (pollInterval) clearInterval(pollInterval);
+          chrome.tabs.onUpdated.removeListener(onTabUpdated);
+          setTimeout(() => chrome.tabs.remove(backgroundTabId).catch(() => {}), 100);
+
+          // result 토큰 저장
+          chrome.storage.local.set({ resultToken }, () => {
+            chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[xn_api_token] 토큰 취득 성공' }).catch(() => {});
+            resolve(true);
+          });
+          return;
+        }
+      } catch (e) {
+        // URL 파싱 실패는 무시
+      }
+    }
+
+    chrome.tabs.onUpdated.addListener(onTabUpdated);
+
+    // 300ms마다 탭 URL 주기적으로 체크 (URL 업데이트 이벤트 누락 방지)
+    pollInterval = setInterval(async () => {
+      if (backgroundTabId) {
+        try {
+          const tab = await chrome.tabs.get(backgroundTabId);
+          onTabUpdated(backgroundTabId, { status: 'complete' }, tab);
+        } catch (e) {
+          // 탭이 닫혔거나 접근 불가
+          finish(false, '[xn_api_token] 배경탭 접근 불가');
+        }
+      }
+    }, 300);
+
+    // 백그라운드 탭에서 SSO 흐름 진행 (사용자에게 보이지 않음)
+    chrome.tabs.create({
+      url: 'https://hy-mooc.hanyang.ac.kr/login?type=sso',
+      active: false,
+    }).then(tab => {
+      backgroundTabId = tab.id;
+      chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[xn_api_token] SSO 탭 생성 (백그라운드)' }).catch(() => {});
+    }).catch(() => finish(false, '[xn_api_token] SSO 탭 생성 실패'));
+  });
+}
 
 // ─── 메시지 핸들러 ────────────────────────────────────────────────────────────
 
@@ -82,27 +135,37 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 
     (async () => {
       try {
-        // 로그인 여부 확인 (401 → 미로그인)
-        const loggedIn = await checkLmsLogin();
-        if (!loggedIn) {
-          trySend({ success: false, error: 'LMS_LOGIN_REQUIRED' });
+        // portal SSO로 result 토큰 취득 (portal 세션 만료 시 탭 활성화하여 로그인 유도)
+        chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[SYNC_LMS] portal SSO 시작 (xn_api_token 취득)' }).catch(() => {});
+        const tokenResult = await getXnApiToken();
+        if (!tokenResult) {
+          chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[SYNC_LMS] xn_api_token 취득 실패 (타임아웃)' }).catch(() => {});
+          trySend({ success: false, error: 'TOKEN_FAILED' });
           return;
         }
 
-        // 쿠키를 서버에 전달 (서버가 LMS API 호출에 사용)
         const cookies = await getLmsCookies();
         const cookieMap = Object.fromEntries(cookies.map(c => [c.name, c.value]));
 
+        // chrome.storage에서 resultToken 읽기
+        const { resultToken } = await chrome.storage.local.get('resultToken');
+
+        chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: `[SYNC_LMS] 서버에 동기화 요청 전송 (resultToken: ${resultToken ? '있음' : '없음'})` }).catch(() => {});
         const res = await fetch(`${SERVER_URL}/api/lms/sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session: request.session, cookies: cookieMap }),
+          body: JSON.stringify({ session: request.session, cookies: cookieMap, resultToken }),
         });
 
         if (!res.ok) throw new Error(`서버 오류: ${res.status}`);
 
+        // 동기화 완료 후 resultToken 삭제
+        await chrome.storage.local.remove('resultToken');
+
+        chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[SYNC_LMS] MQ 전송 완료 → Realtime 이벤트 대기 중' }).catch(() => {});
         trySend({ success: true });
       } catch (error) {
+        chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: `[SYNC_LMS] 오류: ${error.message}` }).catch(() => {});
         trySend({ success: false, error: error.message });
       }
     })();

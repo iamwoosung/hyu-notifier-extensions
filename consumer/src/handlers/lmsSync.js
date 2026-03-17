@@ -28,8 +28,6 @@ function createLmsClient(cookieHeader, jar) {
 // resultToken으로 from_cc 처리 + Canvas 로그인 + xn_api_token 획득
 async function processResultToken(resultToken, jar, cookieHeader) {
   try {
-    logger.info(`[xn_api_token] result 토큰으로 from_cc 처리 시작`);
-
     const fromCcUrl = `${LMS_BASE}/learningx/login/from_cc?result=${encodeURIComponent(resultToken)}`;
     const client = createLmsClient(cookieHeader, jar);
 
@@ -77,8 +75,6 @@ async function processResultToken(resultToken, jar, cookieHeader) {
       },
     });
 
-    logger.info(`[xn_api_token] Canvas 로그인 완료`);
-
     // xn_api_token 확인
     const cookies = await jar.getCookies(LMS_BASE);
     const xnToken = cookies.find(c => c.key === 'xn_api_token');
@@ -86,7 +82,6 @@ async function processResultToken(resultToken, jar, cookieHeader) {
       throw new Error('xn_api_token not found after Canvas login');
     }
 
-    logger.info(`[xn_api_token] 취득 성공`);
     return xnToken.value;
   } catch (e) {
     logger.error(`[xn_api_token] 처리 실패: ${e.message}`);
@@ -95,8 +90,8 @@ async function processResultToken(resultToken, jar, cookieHeader) {
 }
 
 async function handle(message) {
-  const { session, user, cookies, resultToken } = message.payload;
-  logger.info(`[LMS_SYNC] 처리 시작 | user: ${JSON.stringify(user)} | messageId: ${message.messageId}`);
+  const { user, cookies, resultToken } = message.payload;
+  logger.info(`[LMS_SYNC] 처리 시작 | user: ${JSON.stringify(user)} | messageId: ${message.messageId} | resultToken: ${resultToken ? '있음' : '없음'} | xn_api_token(cookie): ${cookies['xn_api_token'] ? '있음' : '없음'}`);
 
   if (!user || !user.UserNo) {
     throw new Error('User information is missing in message payload');
@@ -115,10 +110,12 @@ async function handle(message) {
     if (resultToken && !xnApiToken) {
       try {
         xnApiToken = await processResultToken(resultToken, jar, cookieHeader);
+        logger.info(`[LMS_SYNC] xn_api_token 취득 성공 (from_cc)`);
       } catch (e) {
         logger.warn(`[LMS_SYNC] resultToken 처리 실패: ${e.message} (쿠키의 xn_api_token으로 계속 진행)`);
       }
     }
+    logger.info(`[LMS_SYNC] xn_api_token: ${xnApiToken ? '있음' : '없음 (동영상 동기화 불가)'}`);
 
     // 수강 과목 목록 + 사용자 프로필 병렬 조회
     const [dashRes, profileRes] = await Promise.all([
@@ -134,7 +131,6 @@ async function handle(message) {
       const rawName = profileRes.data.name || '';
       userHYUName  = rawName.split('/')[0].trim() || null;
       userHYUEmail = profileRes.data.primary_email || null;
-      logger.info(`[LMS_SYNC] 사용자 프로필 조회 완료 | 학번: ${userHYUID}, 이름: ${userHYUName}, 이메일: ${userHYUEmail}`);
     }
 
     // 과목 리스트를 JSON 형식으로 변환 (LmsID 포함)
@@ -149,8 +145,6 @@ async function handle(message) {
         SubjectName: subjectName,
       };
     });
-
-    logger.info(`[LMS_SYNC] 수강 과목 ${subjectsList.length}개 조회 완료 | ${subjectsList.map(s => `${s.SubjectCode}_${s.SubjectName}`).join(', ')}`);
 
     // 각 과목의 과제 + 제출 현황 + LearningX 모듈 병렬 조회
     const courseDetails = await Promise.all(courses.map(async (course) => {
@@ -186,7 +180,7 @@ async function handle(message) {
                 module.module_items.forEach(item => {
                   const c = item.content_data || {};
                   videosFlat.push({
-                    LmsItemID:   item.id,
+                    LmsItemID:   item.module_item_id,
                     Title:       item.title,
                     IsWatched:   !!(item.completed || item.attendance_status === 'completed' || item.attendance_status === 'attended'),
                     DurationSec: c.item_content_data?.duration ? Math.round(c.item_content_data.duration) : null,
@@ -235,13 +229,14 @@ async function handle(message) {
     await Promise.all(courseDetails.map(async (detail) => {
       if (detail.error) return;
       if (detail.assignmentsFlat.length > 0) {
-        await db.query({ SP_NAME: 'ASSIGNMENT_SYNC', TABLE: false, p_UserNo: user.UserNo, p_LmsID: detail.id, p_Assignments: JSON.stringify(detail.assignmentsFlat) });
+        const res = await db.query({ SP_NAME: 'ASSIGNMENT_SYNC', TABLE: false, p_UserNo: user.UserNo, p_LmsID: detail.id, p_Assignments: JSON.stringify(detail.assignmentsFlat) });
+        if (res[0]?.ASSIGNMENT_SYNC !== 0) logger.warn(`[LMS_SYNC] ASSIGNMENT_SYNC 실패 (${res[0]?.ASSIGNMENT_SYNC}) | LmsID: ${detail.id} | name: ${detail.name}`);
       }
       if (detail.videosFlat.length > 0) {
-        await db.query({ SP_NAME: 'VIDEO_SYNC', TABLE: false, p_UserNo: user.UserNo, p_LmsID: detail.id, p_Videos: JSON.stringify(detail.videosFlat) });
+        const res = await db.query({ SP_NAME: 'VIDEO_SYNC', TABLE: false, p_UserNo: user.UserNo, p_LmsID: detail.id, p_Videos: JSON.stringify(detail.videosFlat) });
+        if (res[0]?.VIDEO_SYNC !== 0) logger.warn(`[LMS_SYNC] VIDEO_SYNC 실패 (${res[0]?.VIDEO_SYNC}) | LmsID: ${detail.id} | name: ${detail.name}`);
       }
     }));
-    logger.info(`[LMS_SYNC] DB 저장 완료 | 과목: ${courseDetails.length}개, 과제: ${courseDetails.reduce((s, d) => s + (d.assignmentsFlat?.length || 0), 0)}개, 동영상: ${courseDetails.reduce((s, d) => s + (d.videosFlat?.length || 0), 0)}개`);
 
     // 완료 상태 기록 + 학번/이름/이메일 저장 (Realtime → Extension에 push됨)
     await db.query({ SP_NAME: 'USER_SYNC_STATUS_SET', p_UserNo: user.UserNo, p_SyncStatus: 3, p_UserHYUID: userHYUID, p_UserHYUName: userHYUName, p_UserHYUEmail: userHYUEmail });
