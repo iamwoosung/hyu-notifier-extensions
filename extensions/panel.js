@@ -396,21 +396,17 @@ let calendarInstance = null;
 async function loadCalendar() {
   if (typeof FullCalendar === 'undefined') return;
 
-  // TODO: 실제 API 연동 시 아래 mock 데이터를 교체
-  // const { session } = await chrome.storage.local.get('session');
-  // const res = await fetch(`${SERVER_URL}/api/calendar?session=${session}`);
-  // const { events } = await res.json();
-  const today = new Date();
-  const y = today.getFullYear(), m = today.getMonth();
-  const d = (offset) => new Date(y, m, today.getDate() + offset).toISOString().slice(0, 10);
-  const events = [
-    { id: 'a1', title: '[CS101] 운영체제 과제 1', start: d(2),  color: '#d32f2f', extendedProps: { type: 'assignment', subjectCode: 'CS101', isSubmitted: false } },
-    { id: 'a2', title: '[CS102] 알고리즘 과제',   start: d(5),  color: '#388e3c', extendedProps: { type: 'assignment', subjectCode: 'CS102', isSubmitted: true  } },
-    { id: 'a3', title: '[CS103] 데이터베이스 보고서', start: d(9), color: '#d32f2f', extendedProps: { type: 'assignment', subjectCode: 'CS103', isSubmitted: false } },
-    { id: 'v1', title: '[CS101] 3주차 강의 영상', start: d(3),  color: '#9e9e9e', extendedProps: { type: 'video',      subjectCode: 'CS101', isWatched: true  } },
-    { id: 'v2', title: '[CS102] 2주차 알고리즘',  start: d(7),  color: '#f57c00', extendedProps: { type: 'video',      subjectCode: 'CS102', isWatched: false } },
-    { id: 'v3', title: '[CS103] DB 설계 기초',    start: d(-1), color: '#f57c00', extendedProps: { type: 'video',      subjectCode: 'CS103', isWatched: false } },
-  ];
+  const { session } = await chrome.storage.local.get('session');
+  if (!session) return;
+
+  let events = [];
+  try {
+    const res = await fetch(`${SERVER_URL}/api/calendar?session=${session}`);
+    if (res.ok) {
+      const data = await res.json();
+      events = data.events ?? [];
+    }
+  } catch (_) { /* 오프라인 등 오류 시 빈 캘린더 표시 */ }
 
   if (calendarInstance) {
     calendarInstance.removeAllEvents();
@@ -429,9 +425,9 @@ async function loadCalendar() {
     eventClick(info) {
       const p = info.event.extendedProps;
       const status = p.type === 'assignment'
-        ? (p.isSubmitted ? '제출 완료' : '미제출')
-        : (p.isWatched   ? '시청 완료' : '미시청');
-      showToast(`[${p.subjectCode}] ${info.event.title} · ${status}`, 'info');
+        ? (p.isComplete ? '제출 완료' : '미제출')
+        : (p.isComplete ? '시청 완료' : '미시청');
+      showToast(`[${p.subjectName}] ${info.event.title} · ${status}`, 'info');
     },
   });
   calendarInstance.render();

@@ -468,7 +468,7 @@ $$;
 -- ID는 제목 해시로 생성 (LmsItemID 대체)
 -- 반환: 0 = 성공, 9999 = 실패
 -- =============================================
-DROP FUNCTION IF EXISTS "SELC_VIDEO_SYNC"(INTEGER, VARCHAR, JSONB);
+DROP FUNCTION IF EXISTS "SELC_VIDEO_SYNC"(INTEGER, VARCHAR(255), JSONB);
 
 CREATE OR REPLACE FUNCTION "SELC_VIDEO_SYNC"(
     p_UserNo      INTEGER,
@@ -511,13 +511,15 @@ BEGIN
             v_ItemID,
             v_Title,
             (v_Item->>'IsWatched')::BOOLEAN,
-            NULL, NULL, NULL,
+            NULL, NULL,
+            (v_Item->>'PeriodEnd')::TIMESTAMP WITH TIME ZONE,
             NOW(), NOW()
         )
         ON CONFLICT ("SubjectNo", "LmsItemID")
         DO UPDATE SET
             "Title"           = EXCLUDED."Title",
             "IsWatched"       = EXCLUDED."IsWatched",
+            "PeriodEnd"       = COALESCE(EXCLUDED."PeriodEnd", "Video"."PeriodEnd"),
             "VideoUpdateDate" = NOW();
     END LOOP;
 
@@ -529,3 +531,58 @@ EXCEPTION
         RETURN 9999;
 END;
 $$;
+
+
+-- ============================================================
+-- FN: CALENDAR_GET (캘린더 이벤트 조회)
+-- ============================================================
+DROP FUNCTION IF EXISTS "CALENDAR_GET"(INTEGER);
+
+CREATE OR REPLACE FUNCTION "CALENDAR_GET"(
+    p_UserNo INTEGER
+)
+RETURNS JSONB
+AS $$
+DECLARE
+    v_Result JSONB;
+BEGIN
+    SELECT COALESCE(jsonb_agg(row_to_json(data)::JSONB ORDER BY data."PeriodEnd" ASC), '[]'::JSONB)
+    INTO v_Result
+    FROM (
+        SELECT
+            'assignment'::VARCHAR   AS "Type",
+            a."AssignmentNo"        AS "ItemNo",
+            a."Title",
+            s."SubjectName",
+            a."PeriodEnd",
+            a."IsSubmitted"         AS "IsComplete"
+        FROM "Assignment" a
+        JOIN "Subject" s ON a."SubjectNo" = s."SubjectNo"
+        WHERE s."UserNo" = p_UserNo
+          AND s."DeleteFlag" = 0
+          AND a."PeriodEnd" IS NOT NULL
+
+        UNION ALL
+
+        SELECT
+            'video'::VARCHAR        AS "Type",
+            v."VideoNo"             AS "ItemNo",
+            v."Title",
+            s."SubjectName",
+            v."PeriodEnd",
+            v."IsWatched"           AS "IsComplete"
+        FROM "Video" v
+        JOIN "Subject" s ON v."SubjectNo" = s."SubjectNo"
+        WHERE s."UserNo" = p_UserNo
+          AND s."DeleteFlag" = 0
+          AND v."PeriodEnd" IS NOT NULL
+    ) data;
+
+    RETURN v_Result;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE WARNING 'CALENDAR_GET Error - SQLSTATE: %, Message: %', SQLSTATE, SQLERRM;
+        RETURN '[]'::JSONB;
+END;
+$$ LANGUAGE plpgsql;

@@ -63,22 +63,38 @@ function parseVideos(html) {
     const isVideo = $(el).find('img[src*="movie"]').length > 0;
     const isQuiz = $(el).find('img[src*="quiz"]').length > 0;
 
-    results.push({ titleText, progressText, isVideo, isQuiz });
+    // 출석기간 끝 날짜 파싱 (예: "2026.03.03 14:00 ~ 2026.04.07 13:59")
+    let periodEnd = null;
+    const periodDd = $(el).find('.learn_act_box dt:contains("출석기간")').next('dd');
+    if (periodDd.length > 0) {
+      const m = periodDd.text().match(/~\s*(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})/);
+      if (m) periodEnd = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+09:00`;
+    }
+
+    results.push({ titleText, progressText, isVideo, isQuiz, periodEnd });
   });
 
   return results;
 }
 
 function collectDbItems(items, quizzes, videos) {
-  items.forEach(({ titleText, progressText, isVideo, isQuiz }) => {
+  // 기타 아이템(생각해보기 등)에서 주차 수강 마감일 추출
+  let weekPeriodEnd = null;
+  for (const { isVideo, isQuiz, progressText } of items) {
+    if (!isVideo && !isQuiz) {
+      const m = progressText.match(/~\s*(\d{4})\.(\d{2})\.(\d{2})\s+(\d{2}):(\d{2})/);
+      if (m) { weekPeriodEnd = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+09:00`; break; }
+    }
+  }
+
+  items.forEach(({ titleText, progressText, isVideo, isQuiz, periodEnd }) => {
     if (isVideo) {
       const isWatched = progressText.includes('100%') || progressText.includes('완료') || progressText.includes('O');
-      videos.push({ Title: titleText, IsWatched: isWatched });
+      videos.push({ Title: titleText, IsWatched: isWatched, PeriodEnd: periodEnd ?? weekPeriodEnd });
     } else if (isQuiz) {
       const isSubmitted = progressText.includes('응시');
       quizzes.push({ Title: titleText, IsSubmitted: isSubmitted });
     }
-    // 기타: 무시
   });
 }
 
